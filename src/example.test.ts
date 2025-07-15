@@ -1,22 +1,37 @@
+import { ManyToOne, QueryOrder } from '@mikro-orm/core';
 import { Entity, MikroORM, PrimaryKey, Property } from '@mikro-orm/sqlite';
 
 @Entity()
-class User {
-
+class Manufacturer {
   @PrimaryKey()
   id!: number;
 
   @Property()
-  name: string;
+  name!: string;
+}
 
-  @Property({ unique: true })
-  email: string;
+@Entity()
+class Model {
+  @PrimaryKey()
+  id!: number;
 
-  constructor(name: string, email: string) {
-    this.name = name;
-    this.email = email;
-  }
+  @Property()
+  modelName!: string;
 
+  @ManyToOne({ entity: () => Manufacturer })
+  manufacturer!: Manufacturer;
+}
+
+@Entity()
+class Equipment {
+  @PrimaryKey()
+  id!: number;
+
+  @Property()
+  displayName!: string;
+
+  @ManyToOne({ entity: () => Model })
+  model!: Model;
 }
 
 let orm: MikroORM;
@@ -24,7 +39,7 @@ let orm: MikroORM;
 beforeAll(async () => {
   orm = await MikroORM.init({
     dbName: ':memory:',
-    entities: [User],
+    entities: [Equipment, Model, Manufacturer],
     debug: ['query', 'query-params'],
     allowGlobalContext: true, // only for testing
   });
@@ -36,16 +51,28 @@ afterAll(async () => {
 });
 
 test('basic CRUD example', async () => {
-  orm.em.create(User, { name: 'Foo', email: 'foo' });
+  const manufacturer = orm.em.create(Manufacturer, { name: 'Manufacturer' });
+  const model = orm.em.create(Model, { modelName: 'Model', manufacturer });
+  orm.em.create(Equipment, { displayName: 'Equipment', model });
   await orm.em.flush();
   orm.em.clear();
 
-  const user = await orm.em.findOneOrFail(User, { email: 'foo' });
-  expect(user.name).toBe('Foo');
-  user.name = 'Bar';
-  orm.em.remove(user);
-  await orm.em.flush();
+  await expect(
+    orm.em.find(Equipment, {})
+  ).resolves.toHaveLength(1);
 
-  const count = await orm.em.count(User, { email: 'foo' });
-  expect(count).toBe(0);
+  // This works as expected
+  await expect(
+    orm.em.find(Equipment, {}, { orderBy: { model: { manufacturer: { name: QueryOrder.ASC } } } })
+  ).resolves.toHaveLength(1);
+
+  // This also works as expected
+  await expect(
+    orm.em.find(Equipment, {}, { populate: ['model.manufacturer'], orderBy: { model: { manufacturer: { name: QueryOrder.ASC } } } })
+  ).resolves.toHaveLength(1);
+
+  // This fails with a "no such column" error
+  await expect(
+    orm.em.find(Equipment, {}, { populate: ['model'], orderBy: { model: { manufacturer: { name: QueryOrder.ASC } } } })
+  ).resolves.toHaveLength(1);
 });
